@@ -1,0 +1,34 @@
+name: Pella Auto Restart
+
+on:
+  workflow_dispatch:   # 保留手动触发
+  repository_dispatch: # 新增远程触发接口
+    types: [google_trigger] # 必须与 Worker 中的 event_type 一致
+  #schedule:
+  #  - cron: "0 */6 * * *"
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+  
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      - name: 🟢 Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: 📦 Install dependencies
+        run: |
+          npm init -y
+          npm install node-fetch@2 form-data
+
+      - name: 🚀 Run script
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          ACCOUNT_JSON: ${{ secrets.ACCOUNT_JSON }}
+        run: |
+          node index.js
