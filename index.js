@@ -1,0 +1,239 @@
+import fetch from "node-fetch";
+import FormData from "form-data";
+
+// ===== 环境变量 =====
+const TG_BOT_TOKEN = process.env.TG_BOT_TOKEN;
+const TG_CHAT_ID = process.env.TG_CHAT_ID;
+const ACCOUNT_JSON = process.env.ACCOUNT_JSON;
+
+// ===== TG通知 =====
+async function sendTG(msg) {
+  if (!TG_BOT_TOKEN || !TG_CHAT_ID) return;
+
+  await fetch(`https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      chat_id: TG_CHAT_ID,
+      text: msg,
+      parse_mode: "HTML"
+    })
+  });
+}
+
+// ===== 登录 =====
+async function login(email, password) {
+  const BASE = "https://clerk.pella.app/v1/client";
+
+  const res = await fetch(`${BASE}/sign_ins`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      "Origin": "https://www.pella.app",
+      "Referer": "https://www.pella.app/",
+      "User-Agent": "Mozilla/5.0"
+    },
+    body: new URLSearchParams({
+      identifier: email,
+      password: password,
+      strategy: "password"
+    })
+  });
+
+  const text = await res.text();
+
+  if (text.startsWith("<!DOCTYPE")) {
+    throw new Error("被 Cloudflare 拦截");
+  }
+
+  const data = JSON.parse(text);
+
+  const token =
+    data.client?.sessions?.[0]?.last_active_token?.jwt;
+
+  if (!token) throw new Error("token获取失败");
+
+  console.log("✅ token OK:", token.slice(0, 20), "...");
+
+  return { token };
+}
+
+// ===== 获取服务器 =====
+async function getServers(token) {
+  const res = await fetch("https://api.pella.app/user/servers", {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+
+  const text = await res.text();
+  console.log("📦 server/list:", text.slice(0, 200));
+
+  return JSON.parse(text).servers || [];
+}
+
+// ===== stop =====
+async function stopServer(token, serverId) {
+  const res = await fetch("https://api.pella.app/server/stop", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+      Origin: "https://www.pella.app"
+    },
+    body: JSON.stringify({ id: serverId })
+  });
+
+  const text = await res.text();
+  console.log("⛔ stop返回:", text);
+
+  return res.ok;
+}
+
+// ===== restart =====
+async function restartServer(token, serverId) {
+  const form = new FormData();
+  form.append("id", serverId);
+
+  const res = await fetch("https://api.pella.app/server/redeploy", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Origin: "https://www.pella.app",
+      ...form.getHeaders()
+    },
+    body: form
+  });
+
+  const text = await res.text();
+  console.log("🔄 restart返回:", text);
+
+  return res.ok;
+}
+
+// ===== 主逻辑 =====
+async function processAccount(account) {
+  let report = [];
+
+  try {
+    console.log("\n========================");
+    console.log("📧 账号:", account.email);
+
+    const { token } = await login(account.email, account.password);
+
+    const servers = await getServers(token);
+
+    for (const server of servers) {
+      console.log("\n👉 处理:", server.id);
+      console.log("   当前状态:", server.status);
+
+      try {
+        let action = "";
+
+        // ===== 核心逻辑 =====
+        if (server.status.toLowerCase() === "running") {
+          action = "停止+重启";
+
+          await stopServer(token, server.id);
+
+          console.log("⏳ 等待5秒(stop)...");
+          await new Promise(r => setTimeout(r, 5000));
+
+          await restartServer(token, server.id);
+
+        } else {
+          action = "重启";
+          await restartServer(token, server.id);
+        }
+
+        console.log("⏳ 等待15秒...");
+        await new Promise(r => setTimeout(r, 15000));
+
+        const newServers = await getServers(token);
+        const updated = newServers.find(s => s.id === server.id);
+
+        console.log("🧪 操作后状态:", updated?.status);
+
+        let resultText = "";
+        let finalStatus = updated?.status || "未知";
+
+        if (!updated) {
+          resultText = "未找到";
+        } else if (
+          updated.status === "running" &&
+          server.status !== "running"
+        ) {
+          resultText = "启动成功";
+        } else if (updated.status !== server.status) {
+          resultText = "重启成功";
+        } else {
+          resultText = "无变化";
+        }
+
+        report.push(
+`📋 <b>PellaFree 重启报告</b>
+
+账号: ${account.email}
+运行中 | IP: ${server.ip}
+当前状态: ${server.status}
+操作后状态: ${finalStatus}
+本次: ${action} → ${resultText}
+
+────────────────────
+PellaFree Auto Restart`
+        );
+
+      } catch (e) {
+        console.log("❌ 操作异常:", e.message);
+
+        report.push(
+`📋 <b>PellaFree 重启报告</b>
+
+账号: ${account.email}
+当前状态: ${server.status}
+本次: 操作失败
+
+────────────────────
+PellaFree Auto Restart`
+        );
+      }
+    }
+
+  } catch (err) {
+    report.push(
+`📋 <b>PellaFree 重启报告</b>
+
+账号: ${account.email}
+本次: 登录失败
+
+────────────────────
+PellaFree Auto Restart`
+    );
+  }
+
+  return report;
+}
+
+// ===== 入口 =====
+(async () => {
+  const accounts = ACCOUNT_JSON
+    .split("\n")
+    .filter(line => line.includes("-----"))
+    .map(line => {
+      const [email, password] = line.split("-----");
+      return {
+        email: email.trim(),
+        password: password.trim()
+      };
+    });
+
+  let finalReport = [];
+
+  for (const acc of accounts) {
+    const res = await processAccount(acc);
+    finalReport.push(...res);
+  }
+
+  const msg = finalReport.join("\n\n");
+
+  console.log(msg);
+  await sendTG(msg);
+})();
