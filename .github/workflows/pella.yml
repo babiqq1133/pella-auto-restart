@@ -3,7 +3,7 @@ name: Pella Auto Restart
 on:
   workflow_dispatch:   # 保留手动触发
   repository_dispatch: # 新增远程触发接口
-    types: [google_trigger] # 必须与 Worker 中的 event_type 一致
+    types: [pella_trigger] # 必须与 Worker 中的 event_type 一致
   schedule:
     - cron: "0 */6 * * *"
 
