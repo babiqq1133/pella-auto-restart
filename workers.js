@@ -5,7 +5,7 @@ const CONFIG = {
   ARGO_DOMAIN: 'your-argo-domain.com', 
   GITHUB_REPO: 'your-name/your-repo', 
   GITHUB_TOKEN: 'ghp_xxxxxxxxxxxx',    // GitHub PAT
-  EVENT_TYPE: 'google_trigger'          // 必须与 GitHub Workflow 对应
+  EVENT_TYPE: 'pella_trigger'          // 必须与 GitHub Workflow 对应
 };
 
 export default {
