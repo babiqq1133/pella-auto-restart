@@ -5,7 +5,7 @@ on:
   repository_dispatch: # 新增远程触发接口
     types: [pella_trigger] # 必须与 Worker 中的 event_type 一致
   #schedule:
-  #  - cron: "0 */6 * * *"
+  #  - cron: "0 * * * *"
 
 jobs:
   run:
